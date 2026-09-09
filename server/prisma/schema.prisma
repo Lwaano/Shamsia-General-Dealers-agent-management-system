@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  TELLER
+}
+
+enum ProviderType {
+  MOBILE_MONEY
+  BANK
+}
+
+enum AgentType {
+  MOBILE_MONEY_AGENT
+  BANKING_AGENT
+}
+
+enum FloatTxType {
+  TOPUP
+  DISTRIBUTION
+  RETURN
+  ADJUSTMENT
+}
+
+enum TransactionType {
+  CASH_IN
+  CASH_OUT
+  AIRTIME
+  BILL_PAYMENT
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum InventoryTxType {
+  PURCHASE
+  SALE
+  ADJUSTMENT
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(TELLER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  floatTransactions     FloatTransaction[]
+  transactions          Transaction[]
+  inventoryTransactions InventoryTransaction[]
+}
+
+model Provider {
+  id       String       @id @default(cuid())
+  name     String
+  code     String       @unique
+  type     ProviderType
+  isActive Boolean      @default(true)
+
+  agents        Agent[]
+  floatAccounts FloatAccount[]
+}
+
+model Agent {
+  id             String    @id @default(cuid())
+  name           String
+  phoneNumber    String
+  location       String?
+  agentType      AgentType
+  commissionRate Float     @default(0.01)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  providerId String
+  provider   Provider @relation(fields: [providerId], references: [id])
+
+  floatAccounts FloatAccount[]
+  transactions  Transaction[]
+}
+
+model FloatAccount {
+  id          String   @id @default(cuid())
+  balance     Float    @default(0)
+  lowFloatAt  Float    @default(500)
+  lastUpdated DateTime @default(now())
+
+  providerId String
+  provider   Provider @relation(fields: [providerId], references: [id])
+
+  // null agentId => this is Shamsia's own master account for the provider
+  agentId String?
+  agent   Agent?  @relation(fields: [agentId], references: [id])
+
+  outgoingFloatTx FloatTransaction[] @relation("FromAccount")
+  incomingFloatTx FloatTransaction[] @relation("ToAccount")
+
+  @@unique([providerId, agentId])
+}
+
+model FloatTransaction {
+  id               String      @id @default(cuid())
+  type             FloatTxType
+  amount           Float
+  fromAccountId    String?
+  fromAccount      FloatAccount? @relation("FromAccount", fields: [fromAccountId], references: [id])
+  toAccountId      String?
+  toAccount        FloatAccount? @relation("ToAccount", fields: [toAccountId], references: [id])
+  balanceAfterFrom Float?
+  balanceAfterTo   Float?
+  reference        String?
+  note             String?
+  createdAt        DateTime    @default(now())
+
+  recordedById String
+  recordedBy   User   @relation(fields: [recordedById], references: [id])
+}
+
+model Transaction {
+  id                String          @id @default(cuid())
+  type              TransactionType
+  amount            Float
+  commissionAmount  Float           @default(0)
+  floatImpact       Float
+  balanceAfter      Float
+  customerPhone     String?
+  reference         String?
+  createdAt         DateTime        @default(now())
+
+  agentId String
+  agent   Agent  @relation(fields: [agentId], references: [id])
+
+  recordedById String
+  recordedBy   User   @relation(fields: [recordedById], references: [id])
+}
+
+model InventoryCategory {
+  id    String @id @default(cuid())
+  name  String @unique
+  items InventoryItem[]
+}
+
+model InventoryItem {
+  id             String   @id @default(cuid())
+  name           String
+  sku            String   @unique
+  unitCost       Float
+  unitPrice      Float
+  quantityOnHand Int      @default(0)
+  reorderLevel   Int      @default(5)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  categoryId String?
+  category   InventoryCategory? @relation(fields: [categoryId], references: [id])
+
+  transactions InventoryTransaction[]
+}
+
+model InventoryTransaction {
+  id          String           @id @default(cuid())
+  type        InventoryTxType
+  quantity    Int
+  unitPrice   Float
+  totalAmount Float
+  quantityAfter Int
+  note        String?
+  createdAt   DateTime         @default(now())
+
+  itemId String
+  item   InventoryItem @relation(fields: [itemId], references: [id])
+
+  recordedById String
+  recordedBy   User   @relation(fields: [recordedById], references: [id])
+}
