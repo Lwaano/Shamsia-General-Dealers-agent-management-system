@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { transactionApi, agentApi } from '../api/endpoints';
+import BranchFilter from '../components/BranchFilter';
 import { Button, Card, Modal, Select, Input, Badge, Spinner, EmptyState } from '../components/ui';
 import { formatMoney, formatDate, titleCase } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
 
 const TYPE_TONE = {
   CASH_IN: 'blue',
@@ -15,14 +17,17 @@ const TYPE_TONE = {
 };
 
 export default function Transactions() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
+  const [branchId, setBranchId] = useState(undefined);
   const [filters, setFilters] = useState({ agentId: '', type: '' });
 
-  const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: agentApi.list });
+  const { data: agents } = useQuery({ queryKey: ['agents', branchId], queryFn: () => agentApi.list({ branchId }) });
   const { data: transactions, isLoading } = useQuery({
-    queryKey: ['transactions', filters],
-    queryFn: () => transactionApi.list({ agentId: filters.agentId || undefined, type: filters.type || undefined }),
+    queryKey: ['transactions', branchId, filters],
+    queryFn: () => transactionApi.list({ branchId, agentId: filters.agentId || undefined, type: filters.type || undefined }),
   });
 
   const [form, setForm] = useState({ type: 'CASH_IN', agentId: '', amount: '', customerPhone: '', reference: '' });
@@ -47,7 +52,7 @@ export default function Transactions() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Transactions</h1>
           <p className="text-sm text-slate-500">Record agent activity — float balances update automatically.</p>
@@ -56,6 +61,7 @@ export default function Transactions() {
       </div>
 
       <Card className="flex flex-wrap gap-4 p-4">
+        <BranchFilter value={branchId} onChange={setBranchId} />
         <Select label="Agent" value={filters.agentId} onChange={(e) => setFilters({ ...filters, agentId: e.target.value })} className="min-w-[200px]">
           <option value="">All agents</option>
           {(agents || []).map((a) => (
@@ -84,6 +90,7 @@ export default function Transactions() {
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Agent</th>
+                {isAdmin && <th className="px-4 py-3">Branch</th>}
                 <th className="px-4 py-3">Provider</th>
                 <th className="px-4 py-3">Amount</th>
                 <th className="px-4 py-3">Commission</th>
@@ -99,6 +106,7 @@ export default function Transactions() {
                     <Badge tone={TYPE_TONE[t.type]}>{titleCase(t.type)}</Badge>
                   </td>
                   <td className="px-4 py-3 font-medium text-slate-900">{t.agent.name}</td>
+                  {isAdmin && <td className="px-4 py-3 text-slate-600">{t.agent.branch?.name}</td>}
                   <td className="px-4 py-3 text-slate-600">{t.agent.provider.name}</td>
                   <td className="px-4 py-3 font-semibold">{formatMoney(t.amount)}</td>
                   <td className="px-4 py-3 text-brand-700">{formatMoney(t.commissionAmount)}</td>
@@ -108,7 +116,7 @@ export default function Transactions() {
               ))}
               {(transactions || []).length === 0 && (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={isAdmin ? 9 : 8}>
                     <EmptyState message="No transactions recorded yet." />
                   </td>
                 </tr>
@@ -132,6 +140,7 @@ export default function Transactions() {
             {(agents || []).map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name} — {a.provider.name}
+                {isAdmin && a.branch ? ` (${a.branch.name})` : ''}
               </option>
             ))}
           </Select>

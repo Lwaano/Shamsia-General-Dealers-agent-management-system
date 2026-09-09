@@ -17,25 +17,32 @@ const summary = asyncHandler(async (req, res) => {
   const sevenDaysAgo = new Date(today);
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
 
+  const branchWhere = req.branchFilter ? { branchId: req.branchFilter } : {};
+
   const [accounts, todaysTransactions, lowStockItems, allTransactions, allItems] = await Promise.all([
-    prisma.floatAccount.findMany({ include: { provider: true, agent: true } }),
-    prisma.transaction.findMany({ where: { createdAt: { gte: today } } }),
+    prisma.floatAccount.findMany({ where: branchWhere, include: { provider: true, agent: true, branch: true } }),
+    prisma.transaction.findMany({ where: { ...branchWhere, createdAt: { gte: today } } }),
     prisma.inventoryItem.findMany({ where: { isActive: true } }),
     prisma.transaction.findMany({
-      where: { createdAt: { gte: sevenDaysAgo } },
+      where: { ...branchWhere, createdAt: { gte: sevenDaysAgo } },
       include: { agent: true },
     }),
     prisma.inventoryItem.count(),
   ]);
 
   const floatByProvider = {};
+  const floatByBranch = {};
   let totalMasterFloat = 0;
   let totalAgentFloat = 0;
   const lowFloatAccounts = [];
 
   for (const acc of accounts) {
-    const key = acc.provider.name;
-    floatByProvider[key] = (floatByProvider[key] || 0) + acc.balance;
+    const providerKey = acc.provider.name;
+    floatByProvider[providerKey] = (floatByProvider[providerKey] || 0) + acc.balance;
+
+    const branchKey = acc.branch.name;
+    floatByBranch[branchKey] = (floatByBranch[branchKey] || 0) + acc.balance;
+
     if (acc.agentId === null) totalMasterFloat += acc.balance;
     else totalAgentFloat += acc.balance;
     if (acc.balance <= acc.lowFloatAt) lowFloatAccounts.push(acc);
@@ -74,6 +81,10 @@ const summary = asyncHandler(async (req, res) => {
     totalAgentFloat,
     totalFloat: totalMasterFloat + totalAgentFloat,
     floatByProvider: Object.entries(floatByProvider).map(([name, balance]) => ({ name, balance })),
+    // Only meaningful company-wide (all branches combined) - a single-branch view is its own bar.
+    floatByBranch: Object.entries(floatByBranch)
+      .map(([name, balance]) => ({ name, balance }))
+      .sort((a, b) => b.balance - a.balance),
     todaysVolume,
     todaysCommission,
     todaysTransactionCount: todaysTransactions.length,

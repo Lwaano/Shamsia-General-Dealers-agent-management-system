@@ -7,11 +7,13 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Float from './pages/Float';
+import Reconciliation from './pages/Reconciliation';
 import Transactions from './pages/Transactions';
 import Inventory from './pages/Inventory';
 import Agents from './pages/Agents';
 import Users from './pages/Users';
 import Reports from './pages/Reports';
+import AuditLog from './pages/AuditLog';
 
 const queryClient = new QueryClient();
 
@@ -33,6 +35,7 @@ export default function App() {
             >
               <Route index element={<Dashboard />} />
               <Route path="float" element={<Float />} />
+              <Route path="reconciliation" element={<Reconciliation />} />
               <Route path="transactions" element={<Transactions />} />
               <Route path="inventory" element={<Inventory />} />
               <Route
@@ -56,6 +59,14 @@ export default function App() {
                 element={
                   <ProtectedRoute roles={['ADMIN']}>
                     <Users />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="audit-log"
+                element={
+                  <ProtectedRoute roles={['ADMIN']}>
+                    <AuditLog />
                   </ProtectedRoute>
                 }
               />

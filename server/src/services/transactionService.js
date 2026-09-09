@@ -22,8 +22,8 @@ const recordTransaction = async ({ type, agentId, amount, customerPhone, referen
     const agent = await tx.agent.findUnique({ where: { id: agentId } });
     if (!agent || !agent.isActive) throw new ApiError(400, 'Agent not found or inactive');
 
-    const floatAccount = await tx.floatAccount.findUnique({
-      where: { providerId_agentId: { providerId: agent.providerId, agentId } },
+    const floatAccount = await tx.floatAccount.findFirst({
+      where: { providerId: agent.providerId, agentId },
     });
     if (!floatAccount) throw new ApiError(400, 'Agent has no float account for its provider');
 
@@ -50,9 +50,10 @@ const recordTransaction = async ({ type, agentId, amount, customerPhone, referen
         customerPhone,
         reference,
         agentId,
+        branchId: agent.branchId,
         recordedById,
       },
-      include: { agent: { include: { provider: true } } },
+      include: { agent: { include: { provider: true, branch: true } } },
     });
 
     return transaction;

@@ -5,20 +5,26 @@ export const authApi = {
   me: () => client.get('/auth/me').then((r) => r.data),
 };
 
+export const branchApi = {
+  list: () => client.get('/branches').then((r) => r.data.branches),
+  create: (data) => client.post('/branches', data).then((r) => r.data.branch),
+  update: (id, data) => client.patch(`/branches/${id}`, data).then((r) => r.data.branch),
+};
+
 export const providerApi = {
   list: () => client.get('/providers').then((r) => r.data.providers),
   create: (data) => client.post('/providers', data).then((r) => r.data.provider),
 };
 
 export const agentApi = {
-  list: () => client.get('/agents').then((r) => r.data.agents),
+  list: (params) => client.get('/agents', { params }).then((r) => r.data.agents),
   get: (id) => client.get(`/agents/${id}`).then((r) => r.data.agent),
   create: (data) => client.post('/agents', data).then((r) => r.data.agent),
   update: (id, data) => client.patch(`/agents/${id}`, data).then((r) => r.data.agent),
 };
 
 export const floatApi = {
-  listAccounts: () => client.get('/float/accounts').then((r) => r.data.accounts),
+  listAccounts: (params) => client.get('/float/accounts', { params }).then((r) => r.data.accounts),
   listTransactions: (params) => client.get('/float/transactions', { params }).then((r) => r.data.transactions),
   create: (data) => client.post('/float/transactions', data).then((r) => r.data.transaction),
 };
@@ -38,8 +44,15 @@ export const inventoryApi = {
   createTransaction: (data) => client.post('/inventory/transactions', data).then((r) => r.data.transaction),
 };
 
+export const reconciliationApi = {
+  list: (params) => client.get('/reconciliations', { params }).then((r) => r.data.reconciliations),
+  get: (id) => client.get(`/reconciliations/${id}`).then((r) => r.data),
+  open: (data) => client.post('/reconciliations/open', data).then((r) => r.data.reconciliation),
+  close: (id, data) => client.post(`/reconciliations/${id}/close`, data).then((r) => r.data.reconciliation),
+};
+
 export const dashboardApi = {
-  summary: () => client.get('/dashboard/summary').then((r) => r.data),
+  summary: (params) => client.get('/dashboard/summary', { params }).then((r) => r.data),
 };
 
 export const reportApi = {
@@ -52,4 +65,8 @@ export const userApi = {
   list: () => client.get('/users').then((r) => r.data.users),
   create: (data) => client.post('/users', data).then((r) => r.data.user),
   update: (id, data) => client.patch(`/users/${id}`, data).then((r) => r.data.user),
+};
+
+export const auditApi = {
+  list: (params) => client.get('/audit-log', { params }).then((r) => r.data.logs),
 };

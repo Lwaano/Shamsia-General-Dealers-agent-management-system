@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const asyncHandler = require('../utils/asyncHandler');
+const { buildWorkbook } = require('../services/exportService');
 
 const parseRange = (query) => {
   const to = query.to ? new Date(query.to) : new Date();
@@ -23,20 +24,24 @@ const toCsv = (rows, columns) => {
 
 const transactionsReport = asyncHandler(async (req, res) => {
   const { from, to } = parseRange(req.query);
+  const where = { createdAt: { gte: from, lte: to } };
+  if (req.branchFilter) where.branchId = req.branchFilter;
+
   const transactions = await prisma.transaction.findMany({
-    where: { createdAt: { gte: from, lte: to } },
-    include: { agent: { include: { provider: true } }, recordedBy: { select: { name: true } } },
+    where,
+    include: { agent: { include: { provider: true, branch: true } }, recordedBy: { select: { name: true } } },
     orderBy: { createdAt: 'desc' },
   });
 
+  const byType = {};
   const totals = transactions.reduce(
     (acc, t) => {
       acc.volume += t.amount;
       acc.commission += t.commissionAmount;
-      acc.byType[t.type] = (acc.byType[t.type] || 0) + t.amount;
+      byType[t.type] = (byType[t.type] || 0) + t.amount;
       return acc;
     },
-    { volume: 0, commission: 0, byType: {} }
+    { volume: 0, commission: 0 }
   );
 
   if (req.query.format === 'csv') {
@@ -44,6 +49,7 @@ const transactionsReport = asyncHandler(async (req, res) => {
       { label: 'Date', value: (t) => t.createdAt.toISOString() },
       { label: 'Type', value: (t) => t.type },
       { label: 'Agent', value: (t) => t.agent.name },
+      { label: 'Branch', value: (t) => t.agent.branch.name },
       { label: 'Provider', value: (t) => t.agent.provider.name },
       { label: 'Amount', value: (t) => t.amount },
       { label: 'Commission', value: (t) => t.commissionAmount },
@@ -56,13 +62,16 @@ const transactionsReport = asyncHandler(async (req, res) => {
     return res.send(csv);
   }
 
-  res.json({ from, to, totals, transactions });
+  res.json({ from, to, totals, byType, transactions });
 });
 
 const floatReport = asyncHandler(async (req, res) => {
   const { from, to } = parseRange(req.query);
+  const where = { createdAt: { gte: from, lte: to } };
+  if (req.branchFilter) where.branchId = req.branchFilter;
+
   const transactions = await prisma.floatTransaction.findMany({
-    where: { createdAt: { gte: from, lte: to } },
+    where,
     include: {
       fromAccount: { include: { provider: true, agent: true } },
       toAccount: { include: { provider: true, agent: true } },
@@ -99,4 +108,14 @@ const inventoryReport = asyncHandler(async (req, res) => {
   res.json({ from, to, totals, transactions });
 });
 
-module.exports = { transactionsReport, floatReport, inventoryReport };
+const exportExcel = asyncHandler(async (req, res) => {
+  const { from, to } = parseRange(req.query);
+  const workbook = await buildWorkbook({ from, to, branchId: req.branchFilter });
+
+  res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.attachment(`shamsia-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  await workbook.xlsx.write(res);
+  res.end();
+});
+
+module.exports = { transactionsReport, floatReport, inventoryReport, exportExcel };

@@ -1,36 +1,56 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import { reportApi } from '../api/endpoints';
 import client from '../api/client';
+import BranchFilter from '../components/BranchFilter';
 import { Button, Card, Select, Input, Spinner } from '../components/ui';
 import { formatMoney, formatDate, titleCase } from '../utils/format';
 
 const toISODate = (d) => d.toISOString().slice(0, 10);
 
+const downloadBlob = (blobData, filename) => {
+  const url = window.URL.createObjectURL(blobData);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 export default function Reports() {
   const [reportType, setReportType] = useState('transactions');
+  const [branchId, setBranchId] = useState(undefined);
   const [range, setRange] = useState({
     from: toISODate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
     to: toISODate(new Date()),
   });
+  const [exporting, setExporting] = useState(false);
 
   const queryFn = { transactions: reportApi.transactions, float: reportApi.float, inventory: reportApi.inventory }[reportType];
 
   const { data, isLoading } = useQuery({
-    queryKey: ['report', reportType, range],
-    queryFn: () => queryFn(range),
+    queryKey: ['report', reportType, range, branchId],
+    queryFn: () => queryFn({ ...range, branchId }),
   });
 
   const downloadCsv = async () => {
-    const res = await client.get('/reports/transactions', { params: { ...range, format: 'csv' }, responseType: 'blob' });
-    const url = window.URL.createObjectURL(res.data);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'shamsia-transactions-report.csv';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
+    const res = await client.get('/reports/transactions', { params: { ...range, branchId, format: 'csv' }, responseType: 'blob' });
+    downloadBlob(res.data, 'shamsia-transactions-report.csv');
+  };
+
+  const downloadExcel = async () => {
+    setExporting(true);
+    try {
+      const res = await client.get('/reports/export/excel', { params: { ...range, branchId }, responseType: 'blob' });
+      downloadBlob(res.data, `shamsia-report-${range.from}-to-${range.to}.xlsx`);
+    } catch (err) {
+      toast.error('Failed to export Excel workbook');
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -48,11 +68,15 @@ export default function Reports() {
         </Select>
         <Input label="From" type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
         <Input label="To" type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
+        <BranchFilter value={branchId} onChange={setBranchId} />
         {reportType === 'transactions' && (
           <Button variant="secondary" onClick={downloadCsv}>
             ⬇ Export CSV
           </Button>
         )}
+        <Button variant="secondary" onClick={downloadExcel} disabled={exporting}>
+          {exporting ? 'Preparing…' : '⬇ Export Excel (All Data)'}
+        </Button>
       </Card>
 
       {isLoading || !data ? (

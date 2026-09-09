@@ -5,25 +5,48 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash('Admin@123', 10);
-  const admin = await prisma.user.upsert({
+  const branchNames = [...Array.from({ length: 10 }, (_, i) => `Mazabuka Branch ${i + 1}`), 'Pemba Branch'];
+  const branches = {};
+  for (const name of branchNames) {
+    const town = name.startsWith('Mazabuka') ? 'Mazabuka' : 'Pemba';
+    branches[name] = await prisma.branch.upsert({ where: { name }, update: {}, create: { name, town } });
+  }
+  const mainBranch = branches['Mazabuka Branch 1'];
+  const secondBranch = branches['Pemba Branch'];
+
+  const adminHash = await bcrypt.hash('Admin@123', 10);
+  await prisma.user.upsert({
     where: { email: 'admin@shamsia.co.zm' },
     update: {},
-    create: { name: 'Shamsia Admin', email: 'admin@shamsia.co.zm', passwordHash, role: 'ADMIN' },
+    create: { name: 'Shamsia Admin', position: 'Managing Director', email: 'admin@shamsia.co.zm', passwordHash: adminHash, role: 'ADMIN' },
   });
 
   const managerHash = await bcrypt.hash('Manager@123', 10);
   await prisma.user.upsert({
     where: { email: 'manager@shamsia.co.zm' },
     update: {},
-    create: { name: 'Operations Manager', email: 'manager@shamsia.co.zm', passwordHash: managerHash, role: 'MANAGER' },
+    create: {
+      name: 'Operations Manager',
+      position: 'Branch Operations Manager',
+      email: 'manager@shamsia.co.zm',
+      passwordHash: managerHash,
+      role: 'MANAGER',
+      branchId: mainBranch.id,
+    },
   });
 
   const tellerHash = await bcrypt.hash('Teller@123', 10);
   await prisma.user.upsert({
     where: { email: 'teller@shamsia.co.zm' },
     update: {},
-    create: { name: 'Front Desk Teller', email: 'teller@shamsia.co.zm', passwordHash: tellerHash, role: 'TELLER' },
+    create: {
+      name: 'Front Desk Teller',
+      position: 'Teller',
+      email: 'teller@shamsia.co.zm',
+      passwordHash: tellerHash,
+      role: 'TELLER',
+      branchId: mainBranch.id,
+    },
   });
 
   const providersData = [
@@ -36,26 +59,30 @@ async function main() {
 
   const providers = {};
   for (const p of providersData) {
-    const provider = await prisma.provider.upsert({ where: { code: p.code }, update: {}, create: p });
-    providers[p.code] = provider;
-    const existingMaster = await prisma.floatAccount.findFirst({ where: { providerId: provider.id, agentId: null } });
-    if (!existingMaster) {
-      await prisma.floatAccount.create({ data: { providerId: provider.id, agentId: null, balance: 50000 } });
+    providers[p.code] = await prisma.provider.upsert({ where: { code: p.code }, update: {}, create: p });
+  }
+
+  // Every branch gets its own master float account per provider.
+  for (const branch of Object.values(branches)) {
+    for (const provider of Object.values(providers)) {
+      const existing = await prisma.floatAccount.findFirst({ where: { providerId: provider.id, branchId: branch.id, agentId: null } });
+      if (!existing) {
+        await prisma.floatAccount.create({ data: { providerId: provider.id, branchId: branch.id, agentId: null, balance: 50000 } });
+      }
     }
   }
 
   const agentsData = [
-    { name: 'Chilenje Market Agent', phoneNumber: '0977111222', location: 'Chilenje', agentType: 'MOBILE_MONEY_AGENT', commissionRate: 0.02, providerCode: 'MTN' },
-    { name: 'Kabwata Corner Shop', phoneNumber: '0966333444', location: 'Kabwata', agentType: 'MOBILE_MONEY_AGENT', commissionRate: 0.018, providerCode: 'AIRTEL' },
-    { name: 'Matero Trading Post', phoneNumber: '0955555666', location: 'Matero', agentType: 'MOBILE_MONEY_AGENT', commissionRate: 0.02, providerCode: 'ZAMTEL' },
-    { name: 'Cairo Road Banking Agent', phoneNumber: '0977888999', location: 'Cairo Road', agentType: 'BANKING_AGENT', commissionRate: 0.01, providerCode: 'ZANACO' },
-    { name: 'Levy Junction Agent', phoneNumber: '0966222111', location: 'Levy Junction', agentType: 'BANKING_AGENT', commissionRate: 0.012, providerCode: 'FNB' },
+    { name: 'Chilenje Market Agent', phoneNumber: '0977111222', location: 'Chilenje', agentType: 'MOBILE_MONEY_AGENT', commissionRate: 0.02, providerCode: 'MTN', branch: mainBranch },
+    { name: 'Kabwata Corner Shop', phoneNumber: '0966333444', location: 'Kabwata', agentType: 'MOBILE_MONEY_AGENT', commissionRate: 0.018, providerCode: 'AIRTEL', branch: mainBranch },
+    { name: 'Matero Trading Post', phoneNumber: '0955555666', location: 'Matero', agentType: 'MOBILE_MONEY_AGENT', commissionRate: 0.02, providerCode: 'ZAMTEL', branch: mainBranch },
+    { name: 'Cairo Road Banking Agent', phoneNumber: '0977888999', location: 'Cairo Road', agentType: 'BANKING_AGENT', commissionRate: 0.01, providerCode: 'ZANACO', branch: secondBranch },
+    { name: 'Levy Junction Agent', phoneNumber: '0966222111', location: 'Levy Junction', agentType: 'BANKING_AGENT', commissionRate: 0.012, providerCode: 'FNB', branch: secondBranch },
   ];
 
   for (const a of agentsData) {
     const provider = providers[a.providerCode];
-    const existing = await prisma.agent.findFirst({ where: { phoneNumber: a.phoneNumber } });
-    let agent = existing;
+    let agent = await prisma.agent.findFirst({ where: { phoneNumber: a.phoneNumber } });
     if (!agent) {
       agent = await prisma.agent.create({
         data: {
@@ -65,13 +92,14 @@ async function main() {
           agentType: a.agentType,
           commissionRate: a.commissionRate,
           providerId: provider.id,
+          branchId: a.branch.id,
         },
       });
     }
     await prisma.floatAccount.upsert({
-      where: { providerId_agentId: { providerId: provider.id, agentId: agent.id } },
+      where: { providerId_agentId_branchId: { providerId: provider.id, agentId: agent.id, branchId: a.branch.id } },
       update: {},
-      create: { providerId: provider.id, agentId: agent.id, balance: 3000 },
+      create: { providerId: provider.id, agentId: agent.id, branchId: a.branch.id, balance: 3000 },
     });
   }
 
@@ -107,9 +135,10 @@ async function main() {
   }
 
   console.log('Seed complete.');
-  console.log('Login with: admin@shamsia.co.zm / Admin@123 (ADMIN)');
-  console.log('            manager@shamsia.co.zm / Manager@123 (MANAGER)');
-  console.log('            teller@shamsia.co.zm / Teller@123 (TELLER)');
+  console.log(`Branches: ${branchNames.length} (10 Mazabuka + 1 Pemba)`);
+  console.log('Login with: admin@shamsia.co.zm / Admin@123 (ADMIN, all branches)');
+  console.log('            manager@shamsia.co.zm / Manager@123 (MANAGER, Mazabuka Branch 1)');
+  console.log('            teller@shamsia.co.zm / Teller@123 (TELLER, Mazabuka Branch 1)');
 }
 
 main()

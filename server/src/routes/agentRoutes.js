@@ -2,11 +2,13 @@ const { Router } = require('express');
 const { body } = require('express-validator');
 const validate = require('../middleware/validate');
 const { authenticate, authorize } = require('../middleware/auth');
+const { resolveBranchFilter } = require('../middleware/branchScope');
 const { list, get, create, update } = require('../controllers/agentController');
 
 const router = Router();
 
 router.use(authenticate);
+router.use(resolveBranchFilter);
 
 router.get('/', list);
 router.get('/:id', get);

@@ -3,7 +3,7 @@ const { body } = require('express-validator');
 const validate = require('../middleware/validate');
 const { authenticate } = require('../middleware/auth');
 const { resolveBranchFilter } = require('../middleware/branchScope');
-const { list, create } = require('../controllers/transactionController');
+const { list, get, open, close } = require('../controllers/reconciliationController');
 
 const router = Router();
 
@@ -11,18 +11,20 @@ router.use(authenticate);
 router.use(resolveBranchFilter);
 
 router.get('/', list);
+router.get('/:id', get);
 
 router.post(
-  '/',
-  [
-    body('type')
-      .isIn(['CASH_IN', 'CASH_OUT', 'AIRTIME', 'BILL_PAYMENT', 'DEPOSIT', 'WITHDRAWAL'])
-      .withMessage('Invalid transaction type'),
-    body('agentId').notEmpty().withMessage('Agent is required'),
-    body('amount').isFloat({ gt: 0 }).withMessage('Amount must be greater than zero'),
-  ],
+  '/open',
+  [body('floatAccountId').notEmpty().withMessage('Float account is required')],
   validate,
-  create
+  open
+);
+
+router.post(
+  '/:id/close',
+  [body('closingFloatCounted').isFloat({ min: 0 }).withMessage('Counted float balance is required')],
+  validate,
+  close
 );
 
 module.exports = router;

@@ -46,18 +46,52 @@ enum InventoryTxType {
   ADJUSTMENT
 }
 
+enum ReconciliationStatus {
+  OPEN
+  CLOSED
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
+  position     String? // job title shown alongside their name, e.g. "Branch Teller" - distinct from `role`, which only controls access
   email        String   @unique
   passwordHash String
   role         Role     @default(TELLER)
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
 
+  // Which branch this person is assigned to. Admins may be left branch-less (HQ,
+  // sees everything); Managers/Tellers are scoped to their branch's own data.
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
+
   floatTransactions     FloatTransaction[]
   transactions          Transaction[]
   inventoryTransactions InventoryTransaction[]
+  openedReconciliations Reconciliation[]       @relation("ReconciliationOpenedBy")
+  closedReconciliations Reconciliation[]       @relation("ReconciliationClosedBy")
+  auditLogs             AuditLog[]
+}
+
+// A physical Shamsia location - e.g. one of the ten Mazabuka branches or the Pemba
+// branch. Each branch runs its own float and agent network; totals across branches
+// are combined (summed) for the company-wide view rather than stored separately.
+model Branch {
+  id        String   @id @default(cuid())
+  name      String // e.g. "Mazabuka Branch 3"
+  town      String // e.g. "Mazabuka", "Pemba"
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  users             User[]
+  agents            Agent[]
+  floatAccounts     FloatAccount[]
+  transactions      Transaction[]
+  floatTransactions FloatTransaction[]
+
+  @@unique([name])
 }
 
 model Provider {
@@ -84,6 +118,9 @@ model Agent {
   providerId String
   provider   Provider @relation(fields: [providerId], references: [id])
 
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id])
+
   floatAccounts FloatAccount[]
   transactions  Transaction[]
 }
@@ -97,18 +134,24 @@ model FloatAccount {
   providerId String
   provider   Provider @relation(fields: [providerId], references: [id])
 
-  // null agentId => this is Shamsia's own master account for the provider
+  // Every float account - master or agent-owned - belongs to exactly one branch.
+  // A provider therefore has one master account PER branch, not one company-wide.
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id])
+
+  // null agentId => this is the branch's own master account for the provider
   agentId String?
   agent   Agent?  @relation(fields: [agentId], references: [id])
 
   outgoingFloatTx FloatTransaction[] @relation("FromAccount")
   incomingFloatTx FloatTransaction[] @relation("ToAccount")
+  reconciliations Reconciliation[]
 
-  @@unique([providerId, agentId])
+  @@unique([providerId, agentId, branchId])
 }
 
 model FloatTransaction {
-  id               String      @id @default(cuid())
+  id               String        @id @default(cuid())
   type             FloatTxType
   amount           Float
   fromAccountId    String?
@@ -119,33 +162,74 @@ model FloatTransaction {
   balanceAfterTo   Float?
   reference        String?
   note             String?
-  createdAt        DateTime    @default(now())
+  createdAt        DateTime      @default(now())
+
+  // Denormalized from the account(s) involved (they're always in the same branch)
+  // so branch-level ledgers don't need a join through FloatAccount.
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id])
 
   recordedById String
   recordedBy   User   @relation(fields: [recordedById], references: [id])
 }
 
 model Transaction {
-  id                String          @id @default(cuid())
-  type              TransactionType
-  amount            Float
-  commissionAmount  Float           @default(0)
-  floatImpact       Float
-  balanceAfter      Float
-  customerPhone     String?
-  reference         String?
-  createdAt         DateTime        @default(now())
+  id               String          @id @default(cuid())
+  type             TransactionType
+  amount           Float
+  commissionAmount Float           @default(0)
+  floatImpact      Float
+  balanceAfter     Float
+  customerPhone    String?
+  reference        String?
+  createdAt        DateTime        @default(now())
 
   agentId String
   agent   Agent  @relation(fields: [agentId], references: [id])
+
+  // Denormalized from agent.branchId at creation time for branch-level reporting
+  // without a join, and so it stays correct even if the agent is later reassigned.
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id])
 
   recordedById String
   recordedBy   User   @relation(fields: [recordedById], references: [id])
 }
 
+// One open/close cycle for a single float account (a day, or a shift). Compares the
+// system's own running balance against a physically verified count so a shortage —
+// float or cash — shows up immediately instead of being buried until month-end.
+model Reconciliation {
+  id     String               @id @default(cuid())
+  status ReconciliationStatus @default(OPEN)
+
+  floatAccountId String
+  floatAccount   FloatAccount @relation(fields: [floatAccountId], references: [id])
+
+  openingFloatBalance Float // system float balance snapshot at open
+  openingCash         Float    @default(0) // physical cash on hand at open (agent accounts only)
+  openNote            String?
+  openedAt            DateTime @default(now())
+  openedById          String
+  openedBy            User     @relation("ReconciliationOpenedBy", fields: [openedById], references: [id])
+
+  closingFloatBalance Float? // system float balance snapshot at close
+  closingFloatCounted Float? // float balance physically verified (e.g. against the provider's app)
+  expectedClosingCash Float? // openingCash minus the net float impact of transactions during the window
+  closingCashCounted  Float? // physical cash counted at close
+  floatVariance       Float? // closingFloatCounted - closingFloatBalance
+  cashVariance        Float? // closingCashCounted - expectedClosingCash
+  closeNote           String?
+  closedAt            DateTime?
+  closedById          String?
+  closedBy            User?     @relation("ReconciliationClosedBy", fields: [closedById], references: [id])
+
+  @@index([floatAccountId, status])
+}
+
 model InventoryCategory {
-  id    String @id @default(cuid())
-  name  String @unique
+  id    String          @id @default(cuid())
+  name  String          @unique
   items InventoryItem[]
 }
 
@@ -167,18 +251,39 @@ model InventoryItem {
 }
 
 model InventoryTransaction {
-  id          String           @id @default(cuid())
-  type        InventoryTxType
-  quantity    Int
-  unitPrice   Float
-  totalAmount Float
+  id            String          @id @default(cuid())
+  type          InventoryTxType
+  quantity      Int
+  unitPrice     Float
+  totalAmount   Float
   quantityAfter Int
-  note        String?
-  createdAt   DateTime         @default(now())
+  note          String?
+  createdAt     DateTime        @default(now())
 
   itemId String
   item   InventoryItem @relation(fields: [itemId], references: [id])
 
   recordedById String
   recordedBy   User   @relation(fields: [recordedById], references: [id])
+}
+
+// A trail of who did what: every login attempt and every create/update across the
+// app writes one row here, independent of the business record itself, so history
+// survives even if the underlying record is later changed again.
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String // e.g. "LOGIN_SUCCESS", "LOGIN_FAILED", "CREATE_TRANSACTION", "UPDATE_AGENT"
+  entityType String? // e.g. "Transaction", "Agent", "User"
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }

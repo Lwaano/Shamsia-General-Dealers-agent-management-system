@@ -1,17 +1,21 @@
 # Shamsia General Dealers — Super Agent Management System
 
-A web application for tracking **float**, **transactions**, and **inventory** for Shamsia General Dealers, a super agent bridging mobile money agents (MTN, Airtel, Zamtel) and banking express agents with their respective providers/banks.
+A web application for tracking **float**, **transactions**, **inventory**, and **day-to-day reconciliation** across Shamsia General Dealers' branch network — a super agent bridging mobile money agents (MTN, Airtel, Zamtel) and banking express agents with their respective providers/banks.
 
 ## Stack
 
 - **Server**: Node.js, Express, Prisma ORM, PostgreSQL, JWT auth (plain JavaScript)
 - **Client**: React 18, Vite, Tailwind CSS, TanStack Query, Recharts (plain JavaScript/JSX)
+- **Exports**: CSV and multi-sheet Excel workbooks (via ExcelJS)
 
-## How float and transactions are linked
+## How the pieces fit together
 
-- Every provider has a **master float account** (Shamsia's own balance) and every agent has its own float account per provider.
-- **Float movements** (`/float`) record `TOPUP` (provider → master), `DISTRIBUTION` (master → agent), `RETURN` (agent → master), and `ADJUSTMENT`.
-- **Transactions** (`/transactions`) are the agent's customer-facing activity (cash-in, cash-out, airtime, bill payment, deposit, withdrawal). Each one automatically adjusts the agent's float balance (e.g. cash-out increases agent float, cash-in decreases it) and computes commission — so the numbers stay consistent without manual reconciliation.
+- **Branches**: Shamsia operates multiple physical branches (e.g. ten in Mazabuka, one in Pemba). Every branch has its own **master float account** per provider and its own network of agents — float and transactions are tracked per branch first, then combined for a company-wide total.
+- **Float movements** (`/float`) record `TOPUP` (provider → a branch's master account), `DISTRIBUTION` (master → agent), `RETURN` (agent → master), and `ADJUSTMENT`.
+- **Transactions** (`/transactions`) are an agent's customer-facing activity (cash-in, cash-out, airtime, bill payment, deposit, withdrawal). Each one automatically adjusts the agent's float balance (e.g. cash-out increases agent float, cash-in decreases it) and computes commission — so the numbers stay consistent without manual reconciliation.
+- **Day Reconciliation** (`/reconciliation`) is a till/float open-and-close cycle per account: opening a day snapshots the system float balance and (for agent accounts) an opening cash count; closing a day asks for the physically counted float and cash, computes the expected cash position from that window's transactions, and flags any float or cash **variance** — so a shortage shows up immediately, with the exact transactions/float movements from that window available to trace where it came from.
+- **Audit Log** (`/audit-log`, admin only): every login (success or failure) and every create/update across the system is recorded with who did it, when, and the relevant details.
+- **Reports** (`/reports`): date-range summaries per module, a transactions CSV export, and a single **Excel workbook export** covering transactions, float movements, inventory movements, reconciliations, and current float/inventory snapshots in one file.
 
 ## Setup
 
@@ -26,17 +30,19 @@ cd server
 cp .env.example .env   # then edit DATABASE_URL and JWT_SECRET
 npm install
 npm run prisma:migrate -- --name init
-npm run seed            # creates demo users, providers, agents, inventory
+npm run seed            # creates demo branches, users, providers, agents, inventory
 npm run dev             # http://localhost:4000
 ```
 
 Seeded logins (all passwords work immediately, change them in production):
 
-| Role    | Email                  | Password    |
-|---------|-------------------------|-------------|
-| Admin   | admin@shamsia.co.zm    | Admin@123   |
-| Manager | manager@shamsia.co.zm  | Manager@123 |
-| Teller  | teller@shamsia.co.zm   | Teller@123  |
+| Role    | Email                  | Password    | Branch                |
+|---------|-------------------------|-------------|------------------------|
+| Admin   | admin@shamsia.co.zm    | Admin@123   | All branches (HQ)     |
+| Manager | manager@shamsia.co.zm  | Manager@123 | Mazabuka Branch 1     |
+| Teller  | teller@shamsia.co.zm   | Teller@123  | Mazabuka Branch 1     |
+
+The seed creates 11 branches (10 in Mazabuka, 1 in Pemba), each with its own master float account per provider.
 
 ### 3. Client
 
@@ -47,11 +53,13 @@ npm install
 npm run dev             # http://localhost:5173
 ```
 
-## Roles
+## Roles and branch access
 
-- **Admin**: full access, including user management.
-- **Manager**: float, transactions, inventory, agents/providers, reports — no user management.
-- **Teller**: records transactions and inventory movements only; no reports, agents, or user management.
+- **Admin**: full access across every branch, including user management and the audit log, with a branch filter to drill into any single branch's numbers or view the combined total.
+- **Manager**: float, transactions, inventory, agents/providers/branches, reports — scoped to their own assigned branch only. No user management.
+- **Teller**: records transactions and inventory movements, and runs day reconciliation — scoped to their own assigned branch only. No reports, agent/branch management, or user management.
+
+Each user's **name and position** (job title, distinct from their access role) are shown in the sidebar once logged in.
 
 ## Deploying to the cloud later
 

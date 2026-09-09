@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { floatApi, providerApi, agentApi } from '../api/endpoints';
+import { floatApi, providerApi, agentApi, branchApi } from '../api/endpoints';
+import BranchFilter from '../components/BranchFilter';
 import { Button, Card, Modal, Select, Input, Badge, Spinner, EmptyState } from '../components/ui';
 import { formatMoney, formatDate, titleCase } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
@@ -10,16 +11,25 @@ const TYPE_TONE = { TOPUP: 'green', DISTRIBUTION: 'blue', RETURN: 'amber', ADJUS
 
 export default function Float() {
   const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const canManage = user?.role === 'ADMIN' || user?.role === 'MANAGER';
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
+  const [branchId, setBranchId] = useState(undefined);
 
-  const { data: accounts, isLoading: loadingAccounts } = useQuery({ queryKey: ['floatAccounts'], queryFn: floatApi.listAccounts });
-  const { data: ledger, isLoading: loadingLedger } = useQuery({ queryKey: ['floatTransactions'], queryFn: () => floatApi.listTransactions({}) });
+  const { data: accounts, isLoading: loadingAccounts } = useQuery({
+    queryKey: ['floatAccounts', branchId],
+    queryFn: () => floatApi.listAccounts({ branchId }),
+  });
+  const { data: ledger, isLoading: loadingLedger } = useQuery({
+    queryKey: ['floatTransactions', branchId],
+    queryFn: () => floatApi.listTransactions({ branchId }),
+  });
   const { data: providers } = useQuery({ queryKey: ['providers'], queryFn: providerApi.list });
-  const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: agentApi.list });
+  const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => agentApi.list() });
+  const { data: branches } = useQuery({ queryKey: ['branches'], queryFn: branchApi.list, enabled: isAdmin });
 
-  const [form, setForm] = useState({ type: 'TOPUP', providerId: '', agentId: '', amount: '', reference: '', note: '' });
+  const [form, setForm] = useState({ type: 'TOPUP', branchId: '', providerId: '', agentId: '', amount: '', reference: '', note: '' });
 
   const mutation = useMutation({
     mutationFn: floatApi.create,
@@ -29,20 +39,34 @@ export default function Float() {
       queryClient.invalidateQueries({ queryKey: ['floatTransactions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setModalOpen(false);
-      setForm({ type: 'TOPUP', providerId: '', agentId: '', amount: '', reference: '', note: '' });
+      setForm({ type: 'TOPUP', branchId: '', providerId: '', agentId: '', amount: '', reference: '', note: '' });
     },
     onError: (err) => toast.error(err.response?.data?.error || 'Failed to record transaction'),
   });
 
-  const agentsForProvider = useMemo(() => (agents || []).filter((a) => a.providerId === form.providerId), [agents, form.providerId]);
+  const agentsForSelection = useMemo(
+    () => (agents || []).filter((a) => a.providerId === form.providerId && (!form.branchId || a.branchId === form.branchId)),
+    [agents, form.providerId, form.branchId]
+  );
 
   const master = useMemo(() => (accounts || []).filter((a) => !a.agentId), [accounts]);
   const agentAccounts = useMemo(() => (accounts || []).filter((a) => a.agentId), [accounts]);
+
+  const masterByBranch = useMemo(() => {
+    const groups = {};
+    for (const acc of master) {
+      const key = acc.branch.name;
+      groups[key] = groups[key] || [];
+      groups[key].push(acc);
+    }
+    return groups;
+  }, [master]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     mutation.mutate({
       ...form,
+      branchId: form.branchId || undefined,
       agentId: form.type === 'TOPUP' || form.type === 'ADJUSTMENT' ? form.agentId || undefined : form.agentId,
       amount: Number(form.amount),
     });
@@ -52,25 +76,34 @@ export default function Float() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Float Management</h1>
-          <p className="text-sm text-slate-500">Track Shamsia's master float and every agent's balance per provider.</p>
+          <p className="text-sm text-slate-500">Track each branch's master float and every agent's balance per provider.</p>
         </div>
-        {canManage && <Button onClick={() => setModalOpen(true)}>+ Record Movement</Button>}
+        <div className="flex flex-wrap items-center gap-2">
+          <BranchFilter value={branchId} onChange={setBranchId} />
+          {canManage && <Button onClick={() => setModalOpen(true)}>+ Record Movement</Button>}
+        </div>
       </div>
 
-      <div>
-        <h2 className="mb-2 text-sm font-semibold text-slate-700">Master Accounts (Shamsia's balance with providers)</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {master.map((acc) => (
-            <Card key={acc.id} className="p-4">
-              <p className="text-sm font-medium text-slate-500">{acc.provider.name}</p>
-              <p className="mt-1 text-xl font-bold text-brand-700">{formatMoney(acc.balance)}</p>
-              {acc.balance <= acc.lowFloatAt && <Badge tone="red">Low float</Badge>}
-            </Card>
-          ))}
-        </div>
+      <div className="space-y-4">
+        <h2 className="text-sm font-semibold text-slate-700">Master Accounts (branch balance with each provider)</h2>
+        {Object.entries(masterByBranch).map(([branchName, accs]) => (
+          <div key={branchName}>
+            {Object.keys(masterByBranch).length > 1 && <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{branchName}</p>}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              {accs.map((acc) => (
+                <Card key={acc.id} className="p-4">
+                  <p className="text-sm font-medium text-slate-500">{acc.provider.name}</p>
+                  <p className="mt-1 text-xl font-bold text-brand-700">{formatMoney(acc.balance)}</p>
+                  {acc.balance <= acc.lowFloatAt && <Badge tone="red">Low float</Badge>}
+                </Card>
+              ))}
+            </div>
+          </div>
+        ))}
+        {master.length === 0 && <EmptyState message="No master float accounts in scope." />}
       </div>
 
       <div>
@@ -80,6 +113,7 @@ export default function Float() {
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
                 <th className="px-4 py-3">Agent</th>
+                <th className="px-4 py-3">Branch</th>
                 <th className="px-4 py-3">Provider</th>
                 <th className="px-4 py-3">Balance</th>
                 <th className="px-4 py-3">Status</th>
@@ -89,6 +123,7 @@ export default function Float() {
               {agentAccounts.map((acc) => (
                 <tr key={acc.id}>
                   <td className="px-4 py-3 font-medium text-slate-900">{acc.agent?.name}</td>
+                  <td className="px-4 py-3 text-slate-600">{acc.branch.name}</td>
                   <td className="px-4 py-3 text-slate-600">{acc.provider.name}</td>
                   <td className="px-4 py-3 font-semibold">{formatMoney(acc.balance)}</td>
                   <td className="px-4 py-3">
@@ -98,7 +133,7 @@ export default function Float() {
               ))}
               {agentAccounts.length === 0 && (
                 <tr>
-                  <td colSpan={4}>
+                  <td colSpan={5}>
                     <EmptyState message="No agent float accounts yet." />
                   </td>
                 </tr>
@@ -164,6 +199,17 @@ export default function Float() {
             <option value="ADJUSTMENT">Adjustment</option>
           </Select>
 
+          {isAdmin && (
+            <Select label="Branch" value={form.branchId} onChange={(e) => setForm({ ...form, branchId: e.target.value, agentId: '' })} required>
+              <option value="">Select branch…</option>
+              {(branches || []).map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </Select>
+          )}
+
           <Select label="Provider" value={form.providerId} onChange={(e) => setForm({ ...form, providerId: e.target.value, agentId: '' })} required>
             <option value="">Select provider…</option>
             {(providers || []).map((p) => (
@@ -176,7 +222,7 @@ export default function Float() {
           {(form.type === 'DISTRIBUTION' || form.type === 'RETURN') && (
             <Select label="Agent" value={form.agentId} onChange={(e) => setForm({ ...form, agentId: e.target.value })} required>
               <option value="">Select agent…</option>
-              {agentsForProvider.map((a) => (
+              {agentsForSelection.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
                 </option>
@@ -187,7 +233,7 @@ export default function Float() {
           {form.type === 'ADJUSTMENT' && (
             <Select label="Account (leave blank for master account)" value={form.agentId} onChange={(e) => setForm({ ...form, agentId: e.target.value })}>
               <option value="">Master account</option>
-              {agentsForProvider.map((a) => (
+              {agentsForSelection.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
                 </option>

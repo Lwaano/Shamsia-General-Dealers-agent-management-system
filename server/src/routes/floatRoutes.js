@@ -2,11 +2,13 @@ const { Router } = require('express');
 const { body } = require('express-validator');
 const validate = require('../middleware/validate');
 const { authenticate, authorize } = require('../middleware/auth');
+const { resolveBranchFilter } = require('../middleware/branchScope');
 const { listAccounts, listFloatTransactions, createFloatTransaction } = require('../controllers/floatController');
 
 const router = Router();
 
 router.use(authenticate);
+router.use(resolveBranchFilter);
 
 router.get('/accounts', listAccounts);
 router.get('/transactions', listFloatTransactions);

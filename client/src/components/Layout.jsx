@@ -4,11 +4,13 @@ import { useAuth } from '../context/AuthContext';
 const navItems = [
   { to: '/', label: 'Dashboard', icon: '📊', roles: ['ADMIN', 'MANAGER', 'TELLER'] },
   { to: '/float', label: 'Float', icon: '💰', roles: ['ADMIN', 'MANAGER', 'TELLER'] },
+  { to: '/reconciliation', label: 'Day Reconciliation', icon: '🧮', roles: ['ADMIN', 'MANAGER', 'TELLER'] },
   { to: '/transactions', label: 'Transactions', icon: '🔄', roles: ['ADMIN', 'MANAGER', 'TELLER'] },
   { to: '/inventory', label: 'Inventory', icon: '📦', roles: ['ADMIN', 'MANAGER', 'TELLER'] },
-  { to: '/agents', label: 'Agents & Providers', icon: '🧑‍💼', roles: ['ADMIN', 'MANAGER'] },
+  { to: '/agents', label: 'Agents, Providers & Branches', icon: '🧑‍💼', roles: ['ADMIN', 'MANAGER'] },
   { to: '/reports', label: 'Reports', icon: '📈', roles: ['ADMIN', 'MANAGER'] },
   { to: '/users', label: 'Users', icon: '👤', roles: ['ADMIN'] },
+  { to: '/audit-log', label: 'Audit Log', icon: '🕵️', roles: ['ADMIN'] },
 ];
 
 export default function Layout() {
@@ -51,7 +53,8 @@ export default function Layout() {
         </nav>
         <div className="border-t border-brand-900 px-4 py-4">
           <p className="truncate text-sm font-medium text-white">{user?.name}</p>
-          <p className="truncate text-xs text-brand-300">{user?.role}</p>
+          <p className="truncate text-xs text-brand-300">{user?.position || user?.role}</p>
+          <p className="truncate text-xs text-brand-400">{user?.branch ? user.branch.name : 'Head Office - All Branches'}</p>
           <button onClick={handleLogout} className="mt-3 text-xs font-medium text-brand-200 hover:text-white">
             Log out
           </button>
