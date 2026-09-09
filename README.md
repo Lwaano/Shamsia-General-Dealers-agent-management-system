@@ -17,7 +17,7 @@ A web application for tracking **float**, **transactions**, and **inventory** fo
 
 ### 1. Database
 
-You need a PostgreSQL connection string (a free instance from [Neon](https://neon.tech), [Supabase](https://supabase.com), or [Railway](https://railway.app) works well). Set it in `server/.env` as `DATABASE_URL`.
+You need a PostgreSQL connection string (a free instance from [Neon](https://neon.tech), [Supabase](https://supabase.com), or [Railway](https://railway.app) works well). Set it in `server/.env` as `DATABASE_URL`, and set `DIRECT_URL` too — Prisma Migrate needs a non-pooled connection. If your provider only gives you one URL, use it for both.
 
 ### 2. Server
 
@@ -56,3 +56,7 @@ npm run dev             # http://localhost:5173
 ## Deploying to the cloud later
 
 Because the server uses Prisma against `DATABASE_URL`, moving from a local/dev Postgres instance to a managed cloud database is a one-line config change — no code changes required.
+
+## A note on Neon's free tier
+
+Neon's free plan suspends its compute after a period of inactivity. The first request after an idle stretch can take several seconds (occasionally longer) while it wakes back up — the server automatically retries on that specific error so the request still succeeds rather than failing outright, but the first request of the day may just feel slow. Once the app is being used, the connection stays warm and every subsequent request is fast. Upgrading the Neon project (or using an always-on Postgres instance) removes this entirely.

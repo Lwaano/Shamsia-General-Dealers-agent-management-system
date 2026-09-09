@@ -22,10 +22,14 @@ export function AuthProvider({ children }) {
         setUser(freshUser);
         localStorage.setItem('shamsia_user', JSON.stringify(freshUser));
       })
-      .catch(() => {
-        localStorage.removeItem('shamsia_token');
-        localStorage.removeItem('shamsia_user');
-        setUser(null);
+      .catch((err) => {
+        // Only a real auth rejection (401) should end the session — a transient
+        // network/server error shouldn't log the user out on every page refresh.
+        if (err.response?.status === 401) {
+          localStorage.removeItem('shamsia_token');
+          localStorage.removeItem('shamsia_user');
+          setUser(null);
+        }
       })
       .finally(() => setLoading(false));
   }, []);
