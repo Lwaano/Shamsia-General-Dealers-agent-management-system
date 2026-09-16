@@ -12,7 +12,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const prisma = basePrisma.$extends({
   query: {
     async $allOperations({ operation, model, args, query }) {
-      const maxAttempts = 6;
+      const maxAttempts = 8;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
           return await query(args);
@@ -27,7 +27,12 @@ const prisma = basePrisma.$extends({
             err.errorCode === 'P1017' ||
             /Can't reach database server|Server has closed the connection/.test(err.message || '');
           if (!isColdStart || attempt === maxAttempts) throw err;
-          await sleep(attempt * 500);
+          // Once the query engine has seen a failed connection it doesn't reliably retry a
+          // fresh TCP/handshake on its own - force it to drop and lazily re-establish the
+          // connection on the next query, otherwise every retry can just re-fail instantly
+          // against the same stuck engine state instead of actually waiting for Neon to wake.
+          await basePrisma.$disconnect().catch(() => {});
+          await sleep(Math.min(attempt * 1000, 5000));
         }
       }
     },
